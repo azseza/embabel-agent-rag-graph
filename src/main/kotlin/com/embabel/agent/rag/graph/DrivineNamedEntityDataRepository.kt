@@ -22,6 +22,7 @@ import com.embabel.agent.rag.model.NamedEntityData
 import com.embabel.agent.rag.model.RelationshipDirection
 import com.embabel.agent.rag.graph.mappers.NamedEntityDataRowMapper
 import com.embabel.agent.rag.graph.mappers.NamedEntityDataSimilarityMapper
+import com.embabel.agent.rag.graph.util.LuceneQuery
 import com.embabel.agent.rag.service.NamedEntityDataRepository
 import com.embabel.agent.rag.service.NativeFinder
 import com.embabel.agent.rag.service.RelationshipData
@@ -461,7 +462,7 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
 
         val params = mapOf(
             "fulltextIndex" to properties.entityFullTextIndex,
-            "searchText" to request.query,
+            "searchText" to LuceneQuery.sanitize(request.query),
             "similarityThreshold" to request.similarityThreshold,
             "topK" to request.topK,
             "entityNodeName" to properties.entityNodeName,

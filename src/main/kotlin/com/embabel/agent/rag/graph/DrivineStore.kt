@@ -32,6 +32,7 @@ import com.embabel.agent.rag.model.NavigableDocument
 import com.embabel.agent.rag.model.Retrievable
 import com.embabel.agent.rag.graph.mappers.DefaultContentElementRowMapper
 import com.embabel.agent.rag.graph.model.ContentElementRepositoryInfoImpl
+import com.embabel.agent.rag.graph.util.LuceneQuery
 import com.embabel.agent.rag.service.CoreSearchOperations
 import com.embabel.agent.rag.service.EntitySearch
 import com.embabel.agent.rag.service.FilteringTextSearch
@@ -733,7 +734,9 @@ open class DrivineStore @JvmOverloads constructor(
             params = commonParameters(request) + mapOf(
                 "fulltextIndex" to properties.contentElementFullTextIndex,
                 "chunkLabel" to properties.chunkNodeName,
-                "searchText" to "\"${request.query}\"",
+                // Token-match search; phrase-quoting was previously applied here but is now
+                // dropped for consistency with the other fulltext sites that pass unquoted text.
+                "searchText" to LuceneQuery.sanitize(request.query),
             ),
             logger = logger,
         )
@@ -755,7 +758,7 @@ open class DrivineStore @JvmOverloads constructor(
             params = commonParameters(request) + mapOf(
                 "fulltextIndex" to properties.contentElementFullTextIndex,
                 "chunkLabel" to properties.chunkNodeName,
-                "searchText" to request.query,
+                "searchText" to LuceneQuery.sanitize(request.query),
             ),
             logger = logger,
         )
@@ -808,7 +811,7 @@ open class DrivineStore @JvmOverloads constructor(
             params = commonParameters(request) + mapOf(
                 "fulltextIndex" to properties.contentElementFullTextIndex,
                 "chunkLabel" to properties.chunkNodeName,
-                "searchText" to request.query,
+                "searchText" to LuceneQuery.sanitize(request.query),
             ),
             filterResult = filterResult,
             logger = logger,
@@ -878,7 +881,7 @@ open class DrivineStore @JvmOverloads constructor(
                 params = commonParameters(ragRequest) + mapOf(
                     "fulltextIndex" to properties.entityFullTextIndex,
                     "entityNodeName" to properties.entityNodeName,
-                    "searchText" to ragRequest.query,
+                    "searchText" to LuceneQuery.sanitize(ragRequest.query),
                     "labels" to labels,
                 ),
                 logger = logger,

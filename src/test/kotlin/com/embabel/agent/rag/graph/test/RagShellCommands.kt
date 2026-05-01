@@ -17,6 +17,7 @@ package com.embabel.agent.rag.graph.test
 
 import com.embabel.agent.rag.graph.CypherSearch
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
+import com.embabel.agent.rag.graph.util.LuceneQuery
 import org.springframework.shell.standard.ShellComponent
 import org.springframework.shell.standard.ShellMethod
 import org.springframework.shell.standard.ShellOption
@@ -172,7 +173,7 @@ class RagShellCommands(
                 """.trimIndent(),
                 params = mapOf(
                     "indexName" to properties.contentElementFullTextIndex,
-                    "searchText" to searchText,
+                    "searchText" to LuceneQuery.sanitize(searchText),
                     "limit" to limit
                 )
             )

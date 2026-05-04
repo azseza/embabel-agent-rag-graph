@@ -80,7 +80,7 @@ class Neo4jRagDialect : RagDialect {
         YIELD node AS chunk, score
           WHERE score >= ${'$'}similarityThreshold
         RETURN {
-                 text:  chunk.text,
+                 text:  coalesce(chunk.text, chunk.content),
                  id:    chunk.id,
                  score: score
                } AS result
@@ -95,7 +95,7 @@ class Neo4jRagDialect : RagDialect {
              result.score / maxScore AS normalizedScore
           WHERE normalizedScore >= ${'$'}similarityThreshold
         RETURN {
-                 text: chunk.text,
+                 text: coalesce(chunk.text, chunk.content),
                  id:   chunk.id,
                  score: normalizedScore
                } AS result

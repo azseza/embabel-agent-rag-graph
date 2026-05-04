@@ -79,6 +79,7 @@ class Neo4jRagDialect : RagDialect {
         CALL db.index.vector.queryNodes(${'$'}vectorIndex, ${'$'}topK, ${'$'}queryVector)
         YIELD node AS chunk, score
           WHERE score >= ${'$'}similarityThreshold
+            AND (${'$'}domain IS NULL OR chunk.domain = ${'$'}domain)
         RETURN {
                  text:  coalesce(chunk.text, chunk.content),
                  id:    chunk.id,
@@ -94,6 +95,7 @@ class Neo4jRagDialect : RagDialect {
         WITH result.node AS chunk,
              result.score / maxScore AS normalizedScore
           WHERE normalizedScore >= ${'$'}similarityThreshold
+            AND (${'$'}domain IS NULL OR chunk.domain = ${'$'}domain)
         RETURN {
                  text: coalesce(chunk.text, chunk.content),
                  id:   chunk.id,

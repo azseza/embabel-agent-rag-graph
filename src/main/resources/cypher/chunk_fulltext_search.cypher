@@ -7,6 +7,7 @@ UNWIND results AS result
 WITH result.node AS chunk,
      result.score / maxScore AS normalizedScore
   WHERE normalizedScore >= $similarityThreshold
+    AND ($domain IS NULL OR chunk.domain = $domain)
 RETURN {
          text: coalesce(chunk.text, chunk.content),
          id:   chunk.id,

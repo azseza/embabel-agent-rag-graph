@@ -617,7 +617,12 @@ open class DrivineStore @JvmOverloads constructor(
         val embedding = embeddingFor(ragRequest.query)
         val allResults = mutableListOf<SimilarityResult<out Retrievable>>()
         if (ragRequest.contentElementSearch.types.contains(Chunk::class.java)) {
-            allResults += safelyExecuteInTransaction { chunkSearch(ragRequest, embedding) }
+            // Separate fail-soft transactions per leg: a vector-leg failure (e.g. a
+            // missing index) must not kill the independent fulltext leg. One shared
+            // try-block silently blanked the whole chunk search for months (M3,
+            // 2026-06-11 weak-dev root cause).
+            allResults += safelyExecuteInTransaction { chunkSimilaritySearch(ragRequest, embedding) }
+            allResults += safelyExecuteInTransaction { chunkFullTextSearch(ragRequest) }
         } else {
             logger.info("No chunk search specified, skipping chunk search")
         }
@@ -676,15 +681,6 @@ open class DrivineStore @JvmOverloads constructor(
             logger.error("Error during RAG search transaction", e)
             emptyList()
         }
-    }
-
-    private fun chunkSearch(
-        ragRequest: RagRequest,
-        embedding: Embedding,
-    ): List<SimilarityResult<out Chunk>> {
-        val chunkSimilarityResults = chunkSimilaritySearch(ragRequest, embedding)
-        val chunkFullTextResults = chunkFullTextSearch(ragRequest)
-        return chunkSimilarityResults + chunkFullTextResults
     }
 
     override fun <T : Retrievable> vectorSearch(

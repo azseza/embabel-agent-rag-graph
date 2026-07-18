@@ -18,6 +18,7 @@ package com.embabel.agent.rag.graph
 import com.embabel.agent.filter.ObjectFilter
 import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.filter.EntityFilter
+import org.slf4j.LoggerFactory
 
 /**
  * Result of converting a [PropertyFilter] or [EntityFilter] to Cypher WHERE clause components.
@@ -32,6 +33,7 @@ data class CypherFilterResult(
 ) {
     companion object {
         val EMPTY = CypherFilterResult("", emptyMap())
+        private val logger = LoggerFactory.getLogger(CypherFilterResult::class.java)
     }
 
     /**
@@ -49,6 +51,35 @@ data class CypherFilterResult(
             whereClause
         } else {
             "$existingWhereClause AND $whereClause"
+        }
+    }
+
+    /**
+     * Injects this filter's WHERE clause conditions into a Cypher query.
+     *
+     * Finds the first WHERE clause in the query and appends the filter
+     * conditions with AND. If this filter is empty, the query is returned unchanged.
+     *
+     * @param query The original Cypher query
+     * @return The modified query with filter conditions injected
+     */
+    fun injectInto(query: String): String {
+        if (isEmpty()) return query
+
+        // Find WHERE clause and inject filter conditions
+        // Pattern: find "WHERE " followed by conditions, then inject our filter with AND
+        val wherePattern = Regex("(?i)(WHERE\\s+)", RegexOption.MULTILINE)
+        val match = wherePattern.find(query)
+
+        return if (match != null) {
+            // Insert filter conditions after WHERE keyword with AND
+            val insertPoint = match.range.last + 1
+            val filterClause = "($whereClause) AND "
+            query.substring(0, insertPoint) + filterClause + query.substring(insertPoint)
+        } else {
+            // No WHERE clause found - this shouldn't happen for our queries but handle gracefully
+            logger.warn("No WHERE clause found in query, cannot inject filter: {}", query.take(100))
+            query
         }
     }
 }
@@ -116,6 +147,20 @@ class CypherFilterConverter(
         val paramCounter = ParamCounter()
         val whereClause = convertFilter(filter, parameters, paramCounter)
         return CypherFilterResult(whereClause, parameters)
+    }
+
+    /**
+     * Combines two optional filters with AND and converts the result to Cypher WHERE
+     * clause components. Either or both may be null; a null argument is dropped.
+     */
+    fun convert(first: PropertyFilter?, second: PropertyFilter?): CypherFilterResult {
+        val combinedFilter = when {
+            first != null && second != null -> PropertyFilter.And(listOf(first, second))
+            first != null -> first
+            second != null -> second
+            else -> null
+        }
+        return convert(combinedFilter)
     }
 
     private class ParamCounter {

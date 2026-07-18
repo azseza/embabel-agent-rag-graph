@@ -457,8 +457,8 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         val baseStatement = resolveQuery("named_entity_fulltext_search")
         // For NamedEntityData, both metadata and properties are node properties in the graph
         // so we can combine them into a single Cypher filter
-        val combinedFilterResult = combineFilters(metadataFilter, entityFilter)
-        val statement = injectFilterIntoQuery(baseStatement, combinedFilterResult, "n")
+        val combinedFilterResult = filterConverter.convert(metadataFilter, entityFilter)
+        val statement = combinedFilterResult.injectInto(baseStatement)
 
         val params = mapOf(
             "fulltextIndex" to properties.entityFullTextIndex,
@@ -491,8 +491,8 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         val baseStatement = resolveQuery("named_entity_vector_search")
         // For NamedEntityData, both metadata and properties are node properties in the graph
         // so we can combine them into a single Cypher filter
-        val combinedFilterResult = combineFilters(metadataFilter, entityFilter)
-        val statement = injectFilterIntoQuery(baseStatement, combinedFilterResult, "n")
+        val combinedFilterResult = filterConverter.convert(metadataFilter, entityFilter)
+        val statement = combinedFilterResult.injectInto(baseStatement)
 
         val params = mapOf(
             "vectorIndex" to properties.entityIndex,
@@ -510,26 +510,6 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         )
         logger.info("{} vector search results for query '{}'", results.size, request.query)
         return results
-    }
-
-    /**
-     * Combines metadata and property filters into a single CypherFilterResult.
-     * For NamedEntityData in the graph, both are stored as node properties,
-     * so both can be translated to native Cypher WHERE clauses.
-     */
-    private fun combineFilters(
-        metadataFilter: PropertyFilter?,
-        propertyFilter: PropertyFilter?,
-    ): CypherFilterResult {
-        val combinedFilter = when {
-            metadataFilter != null && propertyFilter != null ->
-                PropertyFilter.And(listOf(metadataFilter, propertyFilter))
-
-            metadataFilter != null -> metadataFilter
-            propertyFilter != null -> propertyFilter
-            else -> null
-        }
-        return filterConverter.convert(combinedFilter)
     }
 
     private fun namedEntityQuery(whereClause: String): String {
@@ -559,39 +539,4 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
 
     private fun resolveQuery(name: String): String =
         queryResolver.resolve(name) ?: error("Could not resolve query: $name")
-
-    /**
-     * Injects filter WHERE clause conditions into a Cypher query.
-     *
-     * This method finds the first WHERE clause in the query and appends the filter
-     * conditions with AND. If the filter is empty, the query is returned unchanged.
-     *
-     * @param query The original Cypher query
-     * @param filterResult The converted filter result
-     * @param nodeAlias The node alias used in the query (for logging/debugging)
-     * @return The modified query with filter conditions injected
-     */
-    private fun injectFilterIntoQuery(
-        query: String,
-        filterResult: CypherFilterResult,
-        @Suppress("UNUSED_PARAMETER") nodeAlias: String,
-    ): String {
-        if (filterResult.isEmpty()) return query
-
-        // Find WHERE clause and inject filter conditions
-        // Pattern: find "WHERE " followed by conditions, then inject our filter with AND
-        val wherePattern = Regex("(?i)(WHERE\\s+)", RegexOption.MULTILINE)
-        val match = wherePattern.find(query)
-
-        return if (match != null) {
-            // Insert filter conditions after WHERE keyword with AND
-            val insertPoint = match.range.last + 1
-            val filterClause = "(${filterResult.whereClause}) AND "
-            query.substring(0, insertPoint) + filterClause + query.substring(insertPoint)
-        } else {
-            // No WHERE clause found - this shouldn't happen for our queries but handle gracefully
-            logger.warn("No WHERE clause found in query, appending filter at end: {}", query.take(100))
-            query
-        }
-    }
 }

@@ -715,7 +715,6 @@ open class DrivineStore @JvmOverloads constructor(
         return results
     }
 
-    // TODO remove .cypher files (e.g. chunk_vector_search.cypher) once dialect queries are proven out
     internal fun chunkFullTextSearch(
         request: TextSimilaritySearchRequest,
     ): List<SimilarityResult<out Chunk>> {
@@ -772,7 +771,7 @@ open class DrivineStore @JvmOverloads constructor(
             throw IllegalArgumentException("DrivineStore vectorSearchWithFilter only supports Chunk class, got: $clazz")
         }
         // In the graph, chunk metadata is stored as node properties, so both filters can use native Cypher
-        val filterResult = combineFilters(metadataFilter, entityFilter)
+        val filterResult = chunkFilterConverter.convert(metadataFilter, entityFilter)
         logger.info(
             "Performing vector search with filter: query='{}', topK={}, metadataFilter={}, propertyFilter={}",
             request.query, request.topK, metadataFilter, entityFilter
@@ -792,7 +791,7 @@ open class DrivineStore @JvmOverloads constructor(
         entityFilter: EntityFilter?,
     ): List<SimilarityResult<T>> {
         // In the graph, chunk metadata is stored as node properties, so both filters can use native Cypher
-        val filterResult = combineFilters(metadataFilter, entityFilter)
+        val filterResult = chunkFilterConverter.convert(metadataFilter, entityFilter)
         logger.info(
             "Performing text search with filter: query='{}', topK={}, metadataFilter={}, propertyFilter={}",
             request.query, request.topK, metadataFilter, entityFilter
@@ -814,26 +813,6 @@ open class DrivineStore @JvmOverloads constructor(
         )
         @Suppress("UNCHECKED_CAST")
         return results as List<SimilarityResult<T>>
-    }
-
-    /**
-     * Combines metadata and property filters into a single CypherFilterResult.
-     * In the graph, chunk metadata is stored as node properties (anything not in CORE_PROPERTIES),
-     * so both filter types can be translated to native Cypher WHERE clauses.
-     */
-    private fun combineFilters(
-        metadataFilter: PropertyFilter?,
-        entityFilter: EntityFilter?,
-    ): CypherFilterResult {
-        val combinedFilter = when {
-            metadataFilter != null && entityFilter != null ->
-                PropertyFilter.And(listOf(metadataFilter, entityFilter))
-
-            metadataFilter != null -> metadataFilter
-            entityFilter != null -> entityFilter
-            else -> null
-        }
-        return chunkFilterConverter.convert(combinedFilter)
     }
 
     private fun chunkSimilaritySearchWithFilter(
@@ -924,60 +903,10 @@ open class DrivineStore @JvmOverloads constructor(
         request: RagRequest,
         entitySearch: EntitySearch,
     ): List<SimilarityResult<out Retrievable>> {
-        TODO("Not yet implemented")
-//        val schema = schemaResolver.getSchema(entitySearch)
-//        if (schema == null) {
-//            logger.info("No schema found for entity search {}, skipping Cypher execution", entitySearch)
-//            return emptyList()
-//        }
-//
-//        val cypherRagQueryGenerator = SchemaDrivenCypherRagQueryGenerator(
-//            modelProvider,
-//            schema,
-//        )
-//        val cypher = cypherRagQueryGenerator.generateQuery(request = request)
-//        logger.info("Generated Cypher query: $cypher")
-//
-//        val cypherResults = readonlyTransactionTemplate.execute {
-//            executeGeneratedCypher(cypher)
-//        } ?: Result.failure(
-//            IllegalStateException("Transaction failed or returned null while executing Cypher query: $cypher")
-//        )
-//        if (cypherResults.isSuccess) {
-//            val results = cypherResults.getOrThrow()
-//            if (results.isNotEmpty()) {
-//                logger.info("Cypher query executed successfully, results: {}", results)
-//                return results.map {
-//                    // Most similar as we found them by a query
-//                    SimpleSimilaritySearchResult(
-//                        it,
-//                        score = 1.0,
-//                    )
-//                }
-//            }
-//        }
-//        return emptyList()
+        throw UnsupportedOperationException(
+            "Cypher query generation not implemented; see RagToolGroup tenant-isolation caveat"
+        )
     }
-
-//    /**
-//     * Execute generate Cypher query, being sure to handle exceptions gracefully.
-//     */
-//    private fun executeGeneratedCypher(
-//        query: CypherQuery,
-//    ): Result<List<EntityData>> {
-//        TODO("Not yet implemented")
-//        try {
-//            return Result.success(
-//                ogmCypherSearch.queryForEntities(
-//                    purpose = "cypherGeneratedQuery",
-//                    query = query.query
-//                )
-//            )
-//        } catch (e: Exception) {
-//            logger.error("Error executing generated query: $query", e)
-//            return Result.failure(e)
-//        }
-//    }
 
     private fun commonParameters(request: SimilarityCutoff) = mapOf(
         "topK" to request.topK,

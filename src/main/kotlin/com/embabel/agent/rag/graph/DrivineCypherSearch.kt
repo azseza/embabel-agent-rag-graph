@@ -16,11 +16,9 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.rag.model.Chunk
-import com.embabel.agent.rag.model.ContentElement
 import com.embabel.agent.rag.model.NamedEntityData
 import com.embabel.agent.rag.model.Retrievable
 import com.embabel.agent.rag.graph.mappers.ChunkSimilarityMapper
-import com.embabel.agent.rag.graph.mappers.DefaultContentElementRowMapper
 import com.embabel.agent.rag.graph.mappers.NamedEntityDataRowMapper
 import com.embabel.agent.rag.graph.mappers.NamedEntityDataSimilarityMapper
 import com.embabel.agent.rag.service.Cluster
@@ -152,7 +150,7 @@ open class DrivineCypherSearch @JvmOverloads constructor(
     ): List<SimilarityResult<Chunk>> {
         val loggerToUse = logger ?: this.logger
         val baseCypher = if (query.contains(" ")) query else queryResolver.resolve(query)!!
-        val cypher = injectFilterIntoQuery(baseCypher, filterResult)
+        val cypher = filterResult.injectInto(baseCypher)
         val mergedParams = params + filterResult.parameters
         loggerToUse.info("[{}] query with filter\n\tparams: {}\n{}", purpose, mergedParams, cypher)
 
@@ -191,7 +189,7 @@ open class DrivineCypherSearch @JvmOverloads constructor(
     ): List<SimilarityResult<Chunk>> {
         val loggerToUse = logger ?: this.logger
         val baseCypher = if (query.contains(" ")) query else queryResolver.resolve(query)!!
-        val cypher = injectFilterIntoQuery(baseCypher, filterResult)
+        val cypher = filterResult.injectInto(baseCypher)
         val mergedParams = params + filterResult.parameters
         loggerToUse.info("[{}] query with filter\n\tparams: {}\n{}", purpose, mergedParams, cypher)
 
@@ -261,73 +259,9 @@ open class DrivineCypherSearch @JvmOverloads constructor(
 
     @Transactional(readOnly = true)
     override fun <E> findClusters(opts: ClusterRetrievalRequest<E>): List<Cluster<E>> {
-//        val labels = opts.entitySearch?.labels?.toList() ?: error("Must specify labels in entity search for clustering")
-//        val params = mapOf(
-//            "labels" to labels,
-//            "vectorIndex" to opts.vectorIndex,
-//            "similarityThreshold" to opts.similarityThreshold,
-//            "topK" to opts.topK,
-//        )
-//        val result = query(
-//            purpose = "cluster",
-//            query = "vector_cluster",
-//            params = params,
-//        )
-//        return result.map { row ->
-//            val anchorMap = row["anchor"] as? Map<String, *> ?: error("Expected anchor in row")
-//            val anchor = contentElementMapper.map(anchorMap) as E
-//
-//            val similar = row["similar"] as? List<*> ?: emptyList<E>()
-//            val similarityResults = similar.mapNotNull { similarItem ->
-//                try {
-//                    val similarMap = similarItem as? Map<*, *> ?: return@mapNotNull null
-//                    val matchMap = similarMap["match"] as? Map<String, *> ?: return@mapNotNull null
-//                    val score = similarMap["score"] as? Double ?: return@mapNotNull null
-//
-//                    val matchElement = contentElementMapper.map(matchMap)
-//                    val match = matchElement as E
-//                    logger.debug("Found match: {} with score {}", matchElement.id, "%.2f".format(score))
-//                    SimpleSimilaritySearchResult(match, score) as SimilarityResult<E>
-//                } catch (e: Exception) {
-//                    logger.warn("Could not map similar item: {}", similarItem, e)
-//                    null
-//                }
-//            }
-//            Cluster(anchor, similarityResults)
-//        }
-        TODO()
+        throw UnsupportedOperationException(
+            "findClusters is not yet implemented in DrivineCypherSearch; draft query in cypher/vector_cluster.cypher, see @Disabled clustering test in DrivineCypherSearchTest"
+        )
     }
 
-    /**
-     * Injects filter WHERE clause conditions into a Cypher query.
-     *
-     * This method finds the first WHERE clause in the query and appends the filter
-     * conditions with AND. If the filter is empty, the query is returned unchanged.
-     *
-     * @param query The original Cypher query
-     * @param filterResult The converted filter result
-     * @return The modified query with filter conditions injected
-     */
-    private fun injectFilterIntoQuery(
-        query: String,
-        filterResult: CypherFilterResult,
-    ): String {
-        if (filterResult.isEmpty()) return query
-
-        // Find WHERE clause and inject filter conditions
-        // Pattern: find "WHERE " followed by conditions, then inject our filter with AND
-        val wherePattern = Regex("(?i)(WHERE\\s+)", RegexOption.MULTILINE)
-        val match = wherePattern.find(query)
-
-        return if (match != null) {
-            // Insert filter conditions after WHERE keyword with AND
-            val insertPoint = match.range.last + 1
-            val filterClause = "(${filterResult.whereClause}) AND "
-            query.substring(0, insertPoint) + filterClause + query.substring(insertPoint)
-        } else {
-            // No WHERE clause found - this shouldn't happen for our queries but handle gracefully
-            logger.warn("No WHERE clause found in query, cannot inject filter: {}", query.take(100))
-            query
-        }
-    }
 }

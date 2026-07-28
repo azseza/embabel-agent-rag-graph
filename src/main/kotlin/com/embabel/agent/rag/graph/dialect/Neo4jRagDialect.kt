@@ -31,7 +31,7 @@ class Neo4jRagDialect : RagDialect {
         YIELD node AS chunk, score
           WHERE score >= ${'$'}similarityThreshold
             AND (${'$'}domain IS NULL OR chunk.domain = ${'$'}domain)
-            AND chunk.tenant_id IN [${'$'}tenant, ${'$'}rootTenant]
+            AND ((${'$'}tenant IS NULL AND ${'$'}rootTenant IS NULL) OR chunk.tenant_id IN [${'$'}tenant, ${'$'}rootTenant])
         RETURN {
                  text:  coalesce(chunk.text, chunk.content),
                  id:    chunk.id,
@@ -42,7 +42,7 @@ class Neo4jRagDialect : RagDialect {
     override fun chunkFullTextSearchCypher(): String = """
         CALL db.index.fulltext.queryNodes(${'$'}fulltextIndex, ${'$'}searchText)
         YIELD node AS chunk, score
-        WHERE chunk.tenant_id IN [${'$'}tenant, ${'$'}rootTenant]
+        WHERE ((${'$'}tenant IS NULL AND ${'$'}rootTenant IS NULL) OR chunk.tenant_id IN [${'$'}tenant, ${'$'}rootTenant])
         WITH collect({node: chunk, score: score}) AS results, max(score) AS maxScore
         UNWIND results AS result
         WITH result.node AS chunk,

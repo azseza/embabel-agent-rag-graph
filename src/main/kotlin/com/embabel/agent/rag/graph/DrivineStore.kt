@@ -955,6 +955,12 @@ open class DrivineStore @JvmOverloads constructor(
     private fun commonParameters(request: SimilarityCutoff) = mapOf(
         "topK" to request.topK,
         "similarityThreshold" to request.similarityThreshold,
+        // Tenant/domain scoping parameters are referenced by the dialect chunk legs.
+        // Null here means unscoped (bare-store usage, upstream tests); tenant-aware
+        // consumers (TenantAwareCypherSearch) overwrite these with real values.
+        "tenant" to null,
+        "rootTenant" to null,
+        "domain" to null,
     )
 }
 

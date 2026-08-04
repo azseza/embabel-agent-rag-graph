@@ -111,7 +111,7 @@ abstract class AbstractChunkNodePersistenceTest {
         val restored = loaded!!.toCoreType()
         assertEquals("Retrieval body", restored.text)
         assertEquals("sec-1", restored.metadata["container_section_id"])
-        assertEquals(2L, restored.metadata["sequence_number"])
+        assertEquals(2L, (restored.metadata["sequence_number"] as Number).toLong()) // upstream now preserves the original boxing
         assertEquals("wiki", restored.metadata["source"])
     }
 

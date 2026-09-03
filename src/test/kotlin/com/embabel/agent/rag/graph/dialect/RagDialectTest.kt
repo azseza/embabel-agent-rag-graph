@@ -80,6 +80,15 @@ class RagDialectTest {
         }
 
         @Test
+        fun `chunk fulltext search pushes procLimit into the fulltext procedure's options map`() {
+            val cypher = dialect.chunkFullTextSearchCypher()!!
+            assertTrue(
+                cypher.contains("db.index.fulltext.queryNodes(\$fulltextIndex, \$searchText, {limit: \$procLimit})"),
+                "Expected the fulltext procedure call to carry an options map with limit: \$procLimit"
+            )
+        }
+
+        @Test
         fun `entity fulltext search is supported`() {
             assertNotNull(dialect.entityFullTextSearchCypher())
         }
@@ -92,6 +101,15 @@ class RagDialectTest {
             assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in entity fulltext Cypher")
             assertTrue(collectIndex >= 0, "Expected 'collect(' in entity fulltext Cypher")
             assertTrue(limitIndex < collectIndex, "Candidate LIMIT must precede collect()")
+        }
+
+        @Test
+        fun `entity fulltext search pushes procLimit into the fulltext procedure's options map`() {
+            val cypher = dialect.entityFullTextSearchCypher()!!
+            assertTrue(
+                cypher.contains("db.index.fulltext.queryNodes(\$fulltextIndex, \$searchText, {limit: \$procLimit})"),
+                "Expected the fulltext procedure call to carry an options map with limit: \$procLimit"
+            )
         }
 
         @Test

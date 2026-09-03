@@ -23,12 +23,20 @@ package com.embabel.agent.rag.graph.dialect
  * managers (see [com.embabel.agent.rag.graph.DrivineStore.provision]).
  *
  * The fulltext legs ([chunkFullTextSearchCypher], [entityFullTextSearchCypher]) bound the
- * candidate set with `ORDER BY score DESC LIMIT $candidateLimit` immediately after the tenant/label
- * `WHERE`, before `collect(...)`. `db.index.fulltext.queryNodes` already yields matches in
- * descending score order, so this keeps the true max score while preventing the `collect()` from
- * materialising every match — on a multi-million-chunk corpus, a common-word query previously
- * collected the entire match set and exhausted `dbms.memory.transaction.total.max`.
- * `$candidateLimit` is computed by [com.embabel.agent.rag.graph.GraphRagServiceProperties.fulltextCandidateLimit].
+ * candidate set twice:
+ *  - `db.index.fulltext.queryNodes(index, text, {limit: $procLimit})` — Neo4j 5's fulltext
+ *    procedures accept an options map (`limit`/`skip`/`analyzer`); passing `$procLimit` there
+ *    stops the underlying Lucene-backed index from computing/yielding its full match set, which
+ *    is what made a common-word fulltext search take ~20s on an 8.8M-chunk index.
+ *  - `WITH chunk, score ORDER BY score DESC LIMIT $candidateLimit` immediately after the
+ *    tenant/label `WHERE`, before `collect(...)` — the precise bound that keeps `collect()` from
+ *    materialising more than `$candidateLimit` rows (this is what exhausted
+ *    `dbms.memory.transaction.total.max` on the same corpus). `$procLimit` is deliberately looser
+ *    (2x `$candidateLimit`) than this bound, since the procedure's own tie-breaking order isn't
+ *    guaranteed to agree with Cypher's `ORDER BY score DESC`.
+ * `$candidateLimit` / `$procLimit` are computed by
+ * [com.embabel.agent.rag.graph.GraphRagServiceProperties.fulltextCandidateLimit] /
+ * `DrivineStore.commonParameters`.
  */
 class Neo4jRagDialect : RagDialect {
 
@@ -48,7 +56,7 @@ class Neo4jRagDialect : RagDialect {
           ORDER BY result.score DESC""".trimIndent()
 
     override fun chunkFullTextSearchCypher(): String = """
-        CALL db.index.fulltext.queryNodes(${'$'}fulltextIndex, ${'$'}searchText)
+        CALL db.index.fulltext.queryNodes(${'$'}fulltextIndex, ${'$'}searchText, {limit: ${'$'}procLimit})
         YIELD node AS chunk, score
         WHERE ((${'$'}tenant IS NULL AND ${'$'}rootTenant IS NULL) OR chunk.tenant_id IN [${'$'}tenant, ${'$'}rootTenant])
         WITH chunk, score
@@ -84,7 +92,7 @@ class Neo4jRagDialect : RagDialect {
           ORDER BY result.score DESC""".trimIndent()
 
     override fun entityFullTextSearchCypher(): String = """
-        CALL db.index.fulltext.queryNodes(${'$'}fulltextIndex, ${'$'}searchText)
+        CALL db.index.fulltext.queryNodes(${'$'}fulltextIndex, ${'$'}searchText, {limit: ${'$'}procLimit})
         YIELD node AS m, score
         WHERE score IS NOT NULL AND any(label IN labels(m) WHERE label IN ${'$'}labels)
         WITH m, score

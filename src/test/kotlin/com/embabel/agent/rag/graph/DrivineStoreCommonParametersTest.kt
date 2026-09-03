@@ -27,9 +27,11 @@ import org.springframework.transaction.PlatformTransactionManager
 
 /**
  * Pure unit coverage (no Spring context, no live database) for [DrivineStore.commonParameters] —
- * specifically the `candidateLimit` bind parameter that bounds the fulltext candidate set before
- * score normalisation (see [Neo4jRagDialect][com.embabel.agent.rag.graph.dialect.Neo4jRagDialect]
- * KDoc).
+ * specifically the `candidateLimit` and `procLimit` bind parameters that bound the fulltext
+ * candidate set (see [Neo4jRagDialect][com.embabel.agent.rag.graph.dialect.Neo4jRagDialect] KDoc):
+ * `candidateLimit` bounds what Cypher's `collect()` materialises after the procedure yields;
+ * `procLimit` (= 2x `candidateLimit`) is pushed into `db.index.fulltext.queryNodes`'s own options
+ * map to bound what the procedure itself computes/yields in the first place.
  */
 class DrivineStoreCommonParametersTest {
 
@@ -53,6 +55,30 @@ class DrivineStoreCommonParametersTest {
 
         assertEquals(300, params["candidateLimit"])
         assertEquals(6, params["topK"])
+    }
+
+    @Test
+    fun `procLimit is twice candidateLimit`() {
+        val store = newStore()
+        val request = TextSimilaritySearchRequest("delai de prescription", 0.3, 6)
+
+        val params = store.commonParameters(request)
+
+        assertEquals(300, params["candidateLimit"])
+        assertEquals(600, params["procLimit"])
+    }
+
+    @Test
+    fun `procLimit tracks candidateLimit at the floor and the cap`() {
+        val store = newStore()
+
+        val floored = store.commonParameters(TextSimilaritySearchRequest("query", 0.3, 1))
+        assertEquals(200, floored["candidateLimit"])
+        assertEquals(400, floored["procLimit"])
+
+        val capped = store.commonParameters(TextSimilaritySearchRequest("query", 0.3, 100))
+        assertEquals(1000, capped["candidateLimit"])
+        assertEquals(2000, capped["procLimit"])
     }
 
     @Test

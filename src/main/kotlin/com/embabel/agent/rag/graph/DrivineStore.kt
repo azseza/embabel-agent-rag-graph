@@ -952,20 +952,34 @@ open class DrivineStore @JvmOverloads constructor(
         )
     }
 
-    internal fun commonParameters(request: SimilarityCutoff) = mapOf(
-        "topK" to request.topK,
-        "similarityThreshold" to request.similarityThreshold,
-        // Bound on the fulltext candidate set collected before score normalisation (see
-        // Neo4jRagDialect/MemgraphRagDialect KDoc); unused by the vector-search legs, which
-        // Neo4j/Memgraph accept as an unused bind parameter without error.
-        "candidateLimit" to properties.fulltextCandidateLimit(request.topK),
-        // Tenant/domain scoping parameters are referenced by the dialect chunk legs.
-        // Null here means unscoped (bare-store usage, upstream tests); tenant-aware
-        // consumers (TenantAwareCypherSearch) overwrite these with real values.
-        "tenant" to null,
-        "rootTenant" to null,
-        "domain" to null,
-    )
+    internal fun commonParameters(request: SimilarityCutoff): Map<String, Any?> {
+        val candidateLimit = properties.fulltextCandidateLimit(request.topK)
+        return mapOf(
+            "topK" to request.topK,
+            "similarityThreshold" to request.similarityThreshold,
+            // Bound on the fulltext candidate set collected before score normalisation (see
+            // Neo4jRagDialect/MemgraphRagDialect KDoc); unused by the vector-search legs, which
+            // Neo4j/Memgraph accept as an unused bind parameter without error.
+            "candidateLimit" to candidateLimit,
+            // Coarse bound pushed into db.index.fulltext.queryNodes' own options map
+            // (Neo4j 5+: {limit, skip, analyzer} — verified against neo4j:5.14.0-enterprise,
+            // the version this repo pins). candidateLimit (above) only bounds what Cypher's
+            // collect() materialises after the procedure yields; procLimit bounds what the
+            // procedure itself computes/yields in the first place, which is what made a
+            // common-word fulltext search on the 8.8M-chunk index take ~20s. Deliberately 2x
+            // candidateLimit rather than equal to it: the procedure's own result order isn't
+            // guaranteed to agree with Cypher's eventual `ORDER BY score DESC` on ties, so the
+            // headroom keeps the precise Cypher-level candidateLimit bound from starving on
+            // borderline scores. Neo4j-only (see Neo4jRagDialect); unused by every other leg.
+            "procLimit" to candidateLimit * 2,
+            // Tenant/domain scoping parameters are referenced by the dialect chunk legs.
+            // Null here means unscoped (bare-store usage, upstream tests); tenant-aware
+            // consumers (TenantAwareCypherSearch) overwrite these with real values.
+            "tenant" to null,
+            "rootTenant" to null,
+            "domain" to null,
+        )
+    }
 }
 
 /**

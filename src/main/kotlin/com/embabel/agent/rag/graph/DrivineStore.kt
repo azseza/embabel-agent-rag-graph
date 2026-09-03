@@ -30,7 +30,11 @@ import com.embabel.agent.rag.model.HierarchicalContentElement
 import com.embabel.agent.rag.model.NamedEntityData
 import com.embabel.agent.rag.model.NavigableDocument
 import com.embabel.agent.rag.model.Retrievable
+import com.embabel.agent.rag.graph.fulltext.FULL_TEXT_SIMILARITY_FLOOR
 import com.embabel.agent.rag.graph.mappers.DefaultContentElementRowMapper
+import com.embabel.agent.rag.graph.fulltext.CompositeRequiredTermExtractor
+import com.embabel.agent.rag.graph.fulltext.searchPreparedQuery
+import com.embabel.agent.rag.graph.fulltext.syntaxNotesFor
 import com.embabel.agent.rag.graph.model.ContentElementRepositoryInfoImpl
 import com.embabel.agent.rag.graph.util.LuceneQuery
 import com.embabel.agent.rag.service.CoreSearchOperations
@@ -97,7 +101,9 @@ open class DrivineStore @JvmOverloads constructor(
 
     override val name get() = properties.name
 
-    override val luceneSyntaxNotes = "Full support"
+    // Kept in step with GraphObjectManagerStore: this store is the A/B fallback, so retrieval must not
+    // Derived from the mode so the two cannot drift: see syntaxNotesFor.
+    override val luceneSyntaxNotes get() = syntaxNotesFor(properties.queryMode)
 
     override fun supportsType(type: String): Boolean {
         return type == Chunk::class.java.simpleName
@@ -791,16 +797,20 @@ open class DrivineStore @JvmOverloads constructor(
             ?: throw UnsupportedOperationException(
                 "Fulltext search is not supported by the ${dialect.name} dialect"
             )
-        val results = cypherSearch.chunkFullTextSearch(
-            purpose = "Chunk full text search",
-            query = queryTemplate,
-            params = commonParameters(request) + mapOf(
-                "fulltextIndex" to chunkFullTextIndexName,
-                "chunkLabel" to properties.chunkNodeName,
-                "searchText" to LuceneQuery.sanitize(request.query),
-            ),
-            logger = logger,
-        )
+        val results = searchPreparedQuery(request.query, properties.queryMode, CompositeRequiredTermExtractor()) { searchText ->
+            cypherSearch.chunkFullTextSearch(
+                purpose = "Chunk full text search",
+                query = queryTemplate,
+                params = commonParameters(request) + mapOf(
+                    "fulltextIndex" to chunkFullTextIndexName,
+                    "chunkLabel" to properties.chunkNodeName,
+                    // Escaped after preparation so the relaxed fallback is covered too — see
+                    // LuceneQuery.sanitizeForMode.
+                    "searchText" to LuceneQuery.sanitizeForMode(searchText, properties.queryMode),
+                ),
+                logger = logger,
+            )
+        }
         @Suppress("UNCHECKED_CAST")
         return results as List<SimilarityResult<T>>
     }
@@ -844,17 +854,21 @@ open class DrivineStore @JvmOverloads constructor(
             ?: throw UnsupportedOperationException(
                 "Fulltext search is not supported by the ${dialect.name} dialect"
             )
-        val results = cypherSearch.chunkFullTextSearchWithFilter(
-            purpose = "Chunk full text search with filter",
-            query = queryTemplate,
-            params = commonParameters(request) + mapOf(
-                "fulltextIndex" to chunkFullTextIndexName,
-                "chunkLabel" to properties.chunkNodeName,
-                "searchText" to LuceneQuery.sanitize(request.query),
-            ),
-            filterResult = filterResult,
-            logger = logger,
-        )
+        val results = searchPreparedQuery(request.query, properties.queryMode, CompositeRequiredTermExtractor()) { searchText ->
+            cypherSearch.chunkFullTextSearchWithFilter(
+                purpose = "Chunk full text search with filter",
+                query = queryTemplate,
+                params = commonParameters(request) + mapOf(
+                    "fulltextIndex" to chunkFullTextIndexName,
+                    "chunkLabel" to properties.chunkNodeName,
+                    // Escaped after preparation so the relaxed fallback is covered too — see
+                    // LuceneQuery.sanitizeForMode.
+                    "searchText" to LuceneQuery.sanitizeForMode(searchText, properties.queryMode),
+                ),
+                filterResult = filterResult,
+                logger = logger,
+            )
+        }
         @Suppress("UNCHECKED_CAST")
         return results as List<SimilarityResult<T>>
     }
@@ -894,17 +908,25 @@ open class DrivineStore @JvmOverloads constructor(
         logger.info("{} entity vector results for query '{}'", entityResults.size, ragRequest.query)
         val entityFullTextQuery = dialect.entityFullTextSearchCypher()
         val entityFullTextResults = if (entityFullTextQuery != null) {
-            cypherSearch.entityFullTextSearch(
-                purpose = "Entity full text search",
-                query = entityFullTextQuery,
-                params = commonParameters(ragRequest) + mapOf(
-                    "fulltextIndex" to properties.entityFullTextIndex,
-                    "entityNodeName" to properties.entityNodeName,
-                    "searchText" to LuceneQuery.sanitize(ragRequest.query),
-                    "labels" to labels,
-                ),
-                logger = logger,
-            )
+            searchPreparedQuery(ragRequest.query, properties.queryMode, CompositeRequiredTermExtractor()) { searchText ->
+                cypherSearch.entityFullTextSearch(
+                    purpose = "Entity full text search",
+                    query = entityFullTextQuery,
+                    params = commonParameters(ragRequest) + mapOf(
+                        "fulltextIndex" to properties.entityFullTextIndex,
+                        "entityNodeName" to properties.entityNodeName,
+                        // Escaped after preparation so the relaxed fallback is covered too — see
+                        // LuceneQuery.sanitizeForMode.
+                        "searchText" to LuceneQuery.sanitizeForMode(searchText, properties.queryMode),
+                        "labels" to labels,
+                        // Overrides the cosine-calibrated value commonParameters carried in. Entity
+                        // full-text is BM25-scored, where that number means nothing — the entity
+                        // vector search above keeps it. See FULL_TEXT_SIMILARITY_FLOOR.
+                        "similarityThreshold" to FULL_TEXT_SIMILARITY_FLOOR,
+                    ),
+                    logger = logger,
+                )
+            }
         } else {
             logger.info("Entity fulltext search not supported by dialect '{}', skipping", dialect.name)
             emptyList()

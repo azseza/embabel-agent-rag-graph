@@ -15,6 +15,8 @@
  */
 package com.embabel.agent.rag.graph.util
 
+import com.embabel.agent.rag.graph.fulltext.FullTextQueryMode
+
 /**
  * Escapes Lucene QueryParser reserved characters before calling
  * `db.index.fulltext.queryNodes`.
@@ -40,5 +42,29 @@ object LuceneQuery {
     fun sanitize(q: String?): String {
         if (q.isNullOrBlank()) return "*"
         return RESERVED.replace(q) { "\\" + it.value }
+    }
+
+    /**
+     * The last thing done to a query before it reaches `db.index.fulltext.queryNodes`, applied to
+     * the query [com.embabel.agent.rag.graph.fulltext.searchPreparedQuery] hands to its search
+     * lambda — so both the primary form and its relaxed fallback are covered.
+     *
+     * Escaping depends on the mode because under [FullTextQueryMode.LITERAL] the escaping has
+     * already happened: `FullTextQueryPreparation` escapes every reserved character itself and then
+     * injects `+` operators of its own, so a second pass here would escape those operators and
+     * double-escape the backslashes it just wrote — turning a required identifier into a search for
+     * punctuation.
+     *
+     * Under [FullTextQueryMode.EXPRESSION] — the default, and what this fork runs in production —
+     * upstream passes the caller's string through byte for byte. Callers here are agents that
+     * concatenate conversation context (`[Recent Messages]\nUser: ...`) rather than authors of
+     * Lucene expressions, so an unescaped `[` is a `ParseException` that takes down all chunk and
+     * entity retrieval. [sanitize] is what keeps that from happening, at the documented cost of
+     * neutering any `+` a model emits: this store's precision has always come from `topK` and rank.
+     */
+    @JvmStatic
+    fun sanitizeForMode(q: String?, mode: FullTextQueryMode): String = when (mode) {
+        FullTextQueryMode.EXPRESSION -> sanitize(q)
+        FullTextQueryMode.LITERAL -> if (q.isNullOrBlank()) "*" else q
     }
 }

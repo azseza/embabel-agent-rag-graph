@@ -29,14 +29,20 @@ package com.embabel.agent.rag.graph.dialect
  *    stops the underlying Lucene-backed index from computing/yielding its full match set, which
  *    is what made a common-word fulltext search take ~20s on an 8.8M-chunk index.
  *  - `WITH chunk, score ORDER BY score DESC LIMIT $candidateLimit` immediately after the
- *    tenant/label `WHERE`, before `collect(...)` — the precise bound that keeps `collect()` from
- *    materialising more than `$candidateLimit` rows (this is what exhausted
+ *    tenant/label `WHERE` and before any further projection — the precise bound that keeps the
+ *    query from materialising more than `$candidateLimit` rows (this is what exhausted
  *    `dbms.memory.transaction.total.max` on the same corpus). `$procLimit` is deliberately looser
  *    (2x `$candidateLimit`) than this bound, since the procedure's own tie-breaking order isn't
  *    guaranteed to agree with Cypher's `ORDER BY score DESC`.
  * `$candidateLimit` / `$procLimit` are computed by
  * [com.embabel.agent.rag.graph.GraphRagServiceProperties.fulltextCandidateLimit] /
  * `DrivineStore.commonParameters`.
+ *
+ * Scores are normalised with [RagDialect.bm25K]'s saturating `score / (score + k)` transform, which
+ * depends only on the document's own raw score. Bounding the candidate set therefore cannot change
+ * any surviving row's score — unlike the result-set-relative `max(score)` normalisation this
+ * replaced, where a `LIMIT` would have shifted every score. Both properties matter together: the
+ * bound keeps the transaction small, the transform keeps scores comparable across calls.
  */
 class Neo4jRagDialect : RagDialect {
 
@@ -62,10 +68,7 @@ class Neo4jRagDialect : RagDialect {
         WITH chunk, score
           ORDER BY score DESC
           LIMIT ${'$'}candidateLimit
-        WITH collect({node: chunk, score: score}) AS results, max(score) AS maxScore
-        UNWIND results AS result
-        WITH result.node AS chunk,
-             result.score / maxScore AS normalizedScore
+        WITH chunk, score / (score + $bm25K) AS normalizedScore
           WHERE normalizedScore >= ${'$'}similarityThreshold
             AND (${'$'}domain IS NULL OR chunk.domain = ${'$'}domain)
         RETURN {
@@ -98,15 +101,12 @@ class Neo4jRagDialect : RagDialect {
         WITH m, score
           ORDER BY score DESC
           LIMIT ${'$'}candidateLimit
-        WITH collect({node: m, score: score}) AS results, max(score) AS maxScore
-          WHERE maxScore IS NOT NULL AND maxScore > 0
-        UNWIND results AS result
-        WITH result.node AS match,
-             COALESCE(result.score / maxScore, 0.0) AS score,
-             result.node.name AS name,
-             result.node.description AS description,
-             result.node.id AS id,
-             labels(result.node) AS labels
+        WITH m AS match,
+             score / (score + $bm25K) AS score,
+             m.name AS name,
+             m.description AS description,
+             m.id AS id,
+             labels(m) AS labels
           WHERE score >= ${'$'}similarityThreshold
         RETURN {
                  name:        COALESCE(name, ''),

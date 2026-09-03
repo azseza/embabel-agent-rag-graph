@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph.dialect
 
 import org.drivine.connection.DatabaseType
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Nested
@@ -30,6 +31,38 @@ import org.junit.jupiter.api.assertThrows
  * is exercised by the cross-engine `*RagSearchCharacterizationTest`s.
  */
 class RagDialectTest {
+
+    /**
+     * Pins the two halves of the fulltext scoring contract together, because each is unsafe alone.
+     *
+     * 1. The candidate set is bounded — `ORDER BY score DESC LIMIT $candidateLimit` — and the bound
+     *    lands BEFORE the scoring projection, so nothing downstream ever sees more than
+     *    `$candidateLimit` rows. Without it a common-word query against a multi-million-chunk
+     *    corpus exhausts `dbms.memory.transaction.total.max` (Le Maître prod, 2026-09-03).
+     * 2. Scores are normalised with the saturating `score / (score + k)` form and NOT against the
+     *    result set (`collect(...)` / `max(score)`, which upstream PR #18 removed): a
+     *    result-set-relative normalisation forced the top hit to 1.0 whatever its quality, and made
+     *    scores incomparable between calls.
+     *
+     * They are asserted in one place because the combination is what the merge had to preserve:
+     * result-set-relative scoring plus a `LIMIT` would have silently changed every score, so a
+     * future edit that reinstates `collect(` must fail here rather than pass a bound-only check.
+     */
+    private fun assertBoundedBeforeScoring(cypher: String, leg: String) {
+        val limitIndex = cypher.indexOf("LIMIT \$candidateLimit")
+        val scoringIndex = cypher.indexOf("score / (score + ")
+        assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in $leg fulltext Cypher")
+        assertTrue(
+            cypher.indexOf("ORDER BY score DESC").let { it in 0..<limitIndex },
+            "Candidate LIMIT must be ordered by raw score in $leg fulltext Cypher",
+        )
+        assertTrue(scoringIndex >= 0, "Expected bm25 'score / (score + k)' scoring in $leg fulltext Cypher")
+        assertTrue(limitIndex < scoringIndex, "Candidate LIMIT must precede the scoring projection")
+        assertFalse(
+            cypher.contains("collect(") || cypher.contains("max(score)"),
+            "$leg fulltext Cypher must not normalise against the result set",
+        )
+    }
 
     @Test
     fun `forDatabaseType resolves Neo4j`() {
@@ -70,13 +103,8 @@ class RagDialectTest {
         }
 
         @Test
-        fun `chunk fulltext search bounds candidates before collect`() {
-            val cypher = dialect.chunkFullTextSearchCypher()!!
-            val limitIndex = cypher.indexOf("LIMIT \$candidateLimit")
-            val collectIndex = cypher.indexOf("collect(")
-            assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in chunk fulltext Cypher")
-            assertTrue(collectIndex >= 0, "Expected 'collect(' in chunk fulltext Cypher")
-            assertTrue(limitIndex < collectIndex, "Candidate LIMIT must precede collect()")
+        fun `chunk fulltext search bounds candidates before scoring`() {
+            assertBoundedBeforeScoring(dialect.chunkFullTextSearchCypher()!!, "chunk")
         }
 
         @Test
@@ -94,13 +122,8 @@ class RagDialectTest {
         }
 
         @Test
-        fun `entity fulltext search bounds candidates before collect`() {
-            val cypher = dialect.entityFullTextSearchCypher()!!
-            val limitIndex = cypher.indexOf("LIMIT \$candidateLimit")
-            val collectIndex = cypher.indexOf("collect(")
-            assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in entity fulltext Cypher")
-            assertTrue(collectIndex >= 0, "Expected 'collect(' in entity fulltext Cypher")
-            assertTrue(limitIndex < collectIndex, "Candidate LIMIT must precede collect()")
+        fun `entity fulltext search bounds candidates before scoring`() {
+            assertBoundedBeforeScoring(dialect.entityFullTextSearchCypher()!!, "entity")
         }
 
         @Test
@@ -202,13 +225,8 @@ class RagDialectTest {
         }
 
         @Test
-        fun `chunk fulltext search bounds candidates before collect`() {
-            val cypher = dialect.chunkFullTextSearchCypher()!!
-            val limitIndex = cypher.indexOf("LIMIT \$candidateLimit")
-            val collectIndex = cypher.indexOf("collect(")
-            assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in chunk fulltext Cypher")
-            assertTrue(collectIndex >= 0, "Expected 'collect(' in chunk fulltext Cypher")
-            assertTrue(limitIndex < collectIndex, "Candidate LIMIT must precede collect()")
+        fun `chunk fulltext search bounds candidates before scoring`() {
+            assertBoundedBeforeScoring(dialect.chunkFullTextSearchCypher()!!, "chunk")
         }
 
         @Test
@@ -224,13 +242,8 @@ class RagDialectTest {
         }
 
         @Test
-        fun `entity fulltext search bounds candidates before collect`() {
-            val cypher = dialect.entityFullTextSearchCypher()!!
-            val limitIndex = cypher.indexOf("LIMIT \$candidateLimit")
-            val collectIndex = cypher.indexOf("collect(")
-            assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in entity fulltext Cypher")
-            assertTrue(collectIndex >= 0, "Expected 'collect(' in entity fulltext Cypher")
-            assertTrue(limitIndex < collectIndex, "Candidate LIMIT must precede collect()")
+        fun `entity fulltext search bounds candidates before scoring`() {
+            assertBoundedBeforeScoring(dialect.entityFullTextSearchCypher()!!, "entity")
         }
 
         @Test

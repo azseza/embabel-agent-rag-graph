@@ -30,8 +30,10 @@ package com.embabel.agent.rag.graph.dialect
  *
  * The fulltext legs ([chunkFullTextSearchCypher], [entityFullTextSearchCypher]) bound the
  * candidate set with `ORDER BY score DESC LIMIT $candidateLimit` right after `YIELD` (or the
- * label `WHERE`), before `collect(...)` — same rationale and `$candidateLimit` source as
- * [Neo4jRagDialect]: avoids materialising every match before score normalisation.
+ * label `WHERE`), before any further projection — same rationale and `$candidateLimit` source as
+ * [Neo4jRagDialect]: avoids materialising every match. Scores are then normalised with
+ * [RagDialect.bm25K]'s saturating `score / (score + k)` transform, which depends only on the
+ * document's own raw score, so the bound cannot change any surviving row's score.
  *
  * @see <a href="https://memgraph.com/docs/querying/vector-search">Memgraph Vector Search</a>
  * @see <a href="https://memgraph.com/docs/querying/text-search">Memgraph Text Search</a>
@@ -58,10 +60,7 @@ class MemgraphRagDialect : RagDialect {
         WITH chunk, score
           ORDER BY score DESC
           LIMIT ${'$'}candidateLimit
-        WITH collect({node: chunk, score: score}) AS results, max(score) AS maxScore
-        UNWIND results AS result
-        WITH result.node AS chunk,
-             result.score / maxScore AS normalizedScore
+        WITH chunk, score / (score + $bm25K) AS normalizedScore
           WHERE normalizedScore >= ${'$'}similarityThreshold
         RETURN {
                  text: chunk.text,
@@ -94,15 +93,12 @@ class MemgraphRagDialect : RagDialect {
         WITH m, score
           ORDER BY score DESC
           LIMIT ${'$'}candidateLimit
-        WITH collect({node: m, score: score}) AS results, max(score) AS maxScore
-          WHERE maxScore IS NOT NULL AND maxScore > 0
-        UNWIND results AS result
-        WITH result.node AS match,
-             COALESCE(result.score / maxScore, 0.0) AS score,
-             result.node.name AS name,
-             result.node.description AS description,
-             result.node.id AS id,
-             labels(result.node) AS labels
+        WITH m AS match,
+             score / (score + $bm25K) AS score,
+             m.name AS name,
+             m.description AS description,
+             m.id AS id,
+             labels(m) AS labels
           WHERE score >= ${'$'}similarityThreshold
         RETURN {
                  name:        COALESCE(name, ''),

@@ -21,6 +21,14 @@ package com.embabel.agent.rag.graph.dialect
  * Uses the `db.index.vector.queryNodes` / `db.index.fulltext.queryNodes` procedures for search and
  * stores embeddings as a plain node property. Schema creation is handled by Drivine's schema
  * managers (see [com.embabel.agent.rag.graph.DrivineStore.provision]).
+ *
+ * The fulltext legs ([chunkFullTextSearchCypher], [entityFullTextSearchCypher]) bound the
+ * candidate set with `ORDER BY score DESC LIMIT $candidateLimit` immediately after the tenant/label
+ * `WHERE`, before `collect(...)`. `db.index.fulltext.queryNodes` already yields matches in
+ * descending score order, so this keeps the true max score while preventing the `collect()` from
+ * materialising every match — on a multi-million-chunk corpus, a common-word query previously
+ * collected the entire match set and exhausted `dbms.memory.transaction.total.max`.
+ * `$candidateLimit` is computed by [com.embabel.agent.rag.graph.GraphRagServiceProperties.fulltextCandidateLimit].
  */
 class Neo4jRagDialect : RagDialect {
 
@@ -43,6 +51,9 @@ class Neo4jRagDialect : RagDialect {
         CALL db.index.fulltext.queryNodes(${'$'}fulltextIndex, ${'$'}searchText)
         YIELD node AS chunk, score
         WHERE ((${'$'}tenant IS NULL AND ${'$'}rootTenant IS NULL) OR chunk.tenant_id IN [${'$'}tenant, ${'$'}rootTenant])
+        WITH chunk, score
+          ORDER BY score DESC
+          LIMIT ${'$'}candidateLimit
         WITH collect({node: chunk, score: score}) AS results, max(score) AS maxScore
         UNWIND results AS result
         WITH result.node AS chunk,
@@ -76,6 +87,9 @@ class Neo4jRagDialect : RagDialect {
         CALL db.index.fulltext.queryNodes(${'$'}fulltextIndex, ${'$'}searchText)
         YIELD node AS m, score
         WHERE score IS NOT NULL AND any(label IN labels(m) WHERE label IN ${'$'}labels)
+        WITH m, score
+          ORDER BY score DESC
+          LIMIT ${'$'}candidateLimit
         WITH collect({node: m, score: score}) AS results, max(score) AS maxScore
           WHERE maxScore IS NOT NULL AND maxScore > 0
         UNWIND results AS result

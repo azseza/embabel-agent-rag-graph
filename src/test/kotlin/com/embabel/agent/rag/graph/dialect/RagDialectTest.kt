@@ -70,8 +70,28 @@ class RagDialectTest {
         }
 
         @Test
+        fun `chunk fulltext search bounds candidates before collect`() {
+            val cypher = dialect.chunkFullTextSearchCypher()!!
+            val limitIndex = cypher.indexOf("LIMIT \$candidateLimit")
+            val collectIndex = cypher.indexOf("collect(")
+            assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in chunk fulltext Cypher")
+            assertTrue(collectIndex >= 0, "Expected 'collect(' in chunk fulltext Cypher")
+            assertTrue(limitIndex < collectIndex, "Candidate LIMIT must precede collect()")
+        }
+
+        @Test
         fun `entity fulltext search is supported`() {
             assertNotNull(dialect.entityFullTextSearchCypher())
+        }
+
+        @Test
+        fun `entity fulltext search bounds candidates before collect`() {
+            val cypher = dialect.entityFullTextSearchCypher()!!
+            val limitIndex = cypher.indexOf("LIMIT \$candidateLimit")
+            val collectIndex = cypher.indexOf("collect(")
+            assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in entity fulltext Cypher")
+            assertTrue(collectIndex >= 0, "Expected 'collect(' in entity fulltext Cypher")
+            assertTrue(limitIndex < collectIndex, "Candidate LIMIT must precede collect()")
         }
 
         @Test
@@ -164,6 +184,16 @@ class RagDialectTest {
         }
 
         @Test
+        fun `chunk fulltext search bounds candidates before collect`() {
+            val cypher = dialect.chunkFullTextSearchCypher()!!
+            val limitIndex = cypher.indexOf("LIMIT \$candidateLimit")
+            val collectIndex = cypher.indexOf("collect(")
+            assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in chunk fulltext Cypher")
+            assertTrue(collectIndex >= 0, "Expected 'collect(' in chunk fulltext Cypher")
+            assertTrue(limitIndex < collectIndex, "Candidate LIMIT must precede collect()")
+        }
+
+        @Test
         fun `entity vector search uses vector_search_search`() {
             val cypher = dialect.entityVectorSearchCypher()
             assertTrue(cypher.contains("vector_search.search"))
@@ -173,6 +203,16 @@ class RagDialectTest {
         @Test
         fun `entity fulltext search is supported`() {
             assertNotNull(dialect.entityFullTextSearchCypher())
+        }
+
+        @Test
+        fun `entity fulltext search bounds candidates before collect`() {
+            val cypher = dialect.entityFullTextSearchCypher()!!
+            val limitIndex = cypher.indexOf("LIMIT \$candidateLimit")
+            val collectIndex = cypher.indexOf("collect(")
+            assertTrue(limitIndex >= 0, "Expected 'LIMIT \$candidateLimit' in entity fulltext Cypher")
+            assertTrue(collectIndex >= 0, "Expected 'collect(' in entity fulltext Cypher")
+            assertTrue(limitIndex < collectIndex, "Candidate LIMIT must precede collect()")
         }
 
         @Test

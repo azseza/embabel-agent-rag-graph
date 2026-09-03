@@ -28,6 +28,11 @@ package com.embabel.agent.rag.graph.dialect
  * Schema creation is handled by Drivine's schema managers (see
  * [com.embabel.agent.rag.graph.DrivineStore.provision]).
  *
+ * The fulltext legs ([chunkFullTextSearchCypher], [entityFullTextSearchCypher]) bound the
+ * candidate set with `ORDER BY score DESC LIMIT $candidateLimit` right after `YIELD` (or the
+ * label `WHERE`), before `collect(...)` — same rationale and `$candidateLimit` source as
+ * [Neo4jRagDialect]: avoids materialising every match before score normalisation.
+ *
  * @see <a href="https://memgraph.com/docs/querying/vector-search">Memgraph Vector Search</a>
  * @see <a href="https://memgraph.com/docs/querying/text-search">Memgraph Text Search</a>
  */
@@ -50,6 +55,9 @@ class MemgraphRagDialect : RagDialect {
     override fun chunkFullTextSearchCypher(): String = """
         CALL text_search.search_all(${'$'}fulltextIndex, ${'$'}searchText)
         YIELD node AS chunk, score
+        WITH chunk, score
+          ORDER BY score DESC
+          LIMIT ${'$'}candidateLimit
         WITH collect({node: chunk, score: score}) AS results, max(score) AS maxScore
         UNWIND results AS result
         WITH result.node AS chunk,
@@ -83,6 +91,9 @@ class MemgraphRagDialect : RagDialect {
         CALL text_search.search_all(${'$'}fulltextIndex, ${'$'}searchText)
         YIELD node AS m, score
         WHERE score IS NOT NULL AND any(label IN labels(m) WHERE label IN ${'$'}labels)
+        WITH m, score
+          ORDER BY score DESC
+          LIMIT ${'$'}candidateLimit
         WITH collect({node: m, score: score}) AS results, max(score) AS maxScore
           WHERE maxScore IS NOT NULL AND maxScore > 0
         UNWIND results AS result

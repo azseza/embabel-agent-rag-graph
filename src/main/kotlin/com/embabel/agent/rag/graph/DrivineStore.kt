@@ -952,9 +952,13 @@ open class DrivineStore @JvmOverloads constructor(
         )
     }
 
-    private fun commonParameters(request: SimilarityCutoff) = mapOf(
+    internal fun commonParameters(request: SimilarityCutoff) = mapOf(
         "topK" to request.topK,
         "similarityThreshold" to request.similarityThreshold,
+        // Bound on the fulltext candidate set collected before score normalisation (see
+        // Neo4jRagDialect/MemgraphRagDialect KDoc); unused by the vector-search legs, which
+        // Neo4j/Memgraph accept as an unused bind parameter without error.
+        "candidateLimit" to properties.fulltextCandidateLimit(request.topK),
         // Tenant/domain scoping parameters are referenced by the dialect chunk legs.
         // Null here means unscoped (bare-store usage, upstream tests); tenant-aware
         // consumers (TenantAwareCypherSearch) overwrite these with real values.

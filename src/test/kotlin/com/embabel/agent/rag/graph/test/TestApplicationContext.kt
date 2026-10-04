@@ -17,10 +17,8 @@ package com.embabel.agent.rag.graph.test
 
 import com.embabel.agent.rag.ingestion.ChunkTransformer
 import com.embabel.agent.rag.ingestion.ContentChunker
-import com.embabel.agent.rag.graph.DrivineCypherSearch
 import com.embabel.agent.rag.graph.GraphObjectManagerStore
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
-import com.embabel.agent.rag.graph.dialect.Neo4jRagDialect
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import com.embabel.common.util.generateRandomFloatArray
 import org.drivine.autoconfigure.EnableDrivine
@@ -65,7 +63,6 @@ import java.util.*
             RagTestShellApplication::class,
             RagShellCommands::class,
             RagChatActions::class,
-            DrivineCypherSearch::class,
             GraphObjectManagerStore::class,
         ]
     )]
@@ -80,9 +77,7 @@ class TestAppContext {
     }
 
     @Bean
-    fun drivineCypherSearch(persistenceManager: PersistenceManager): DrivineCypherSearch {
-        return DrivineCypherSearch(persistenceManager)
-    }
+    fun shellCypher(persistenceManager: PersistenceManager): ShellCypher = ShellCypher(persistenceManager)
 
     @Bean
     fun gomStore(

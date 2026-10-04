@@ -29,7 +29,9 @@ import com.embabel.agent.rag.graph.model.ContainerSectionNode
 import com.embabel.agent.rag.graph.model.ContentElementNode
 import com.embabel.agent.rag.graph.model.ContentElementRepositoryInfoImpl
 import com.embabel.agent.rag.graph.model.DocumentNode
+import com.embabel.agent.rag.graph.model.LeafSectionHeading
 import com.embabel.agent.rag.graph.model.LeafSectionNode
+import com.embabel.agent.rag.graph.model.SectionHeadingNode
 import com.embabel.agent.rag.graph.model.ZoomOutView
 // Generated Drivine query DSL for the @NodeFragment models: the `loadAll` / `count` { where { } / depth() }
 // extensions, the `chunk` / `element` root accessors, and `ChunkNodeQueryDsl` for the filtered search forms.
@@ -49,6 +51,7 @@ import com.embabel.agent.rag.model.ContentRoot
 import com.embabel.agent.rag.model.LeafSection
 import com.embabel.agent.rag.model.MaterializedDocument
 import com.embabel.agent.rag.model.NavigableDocument
+import com.embabel.agent.rag.model.NavigableSection
 import com.embabel.agent.rag.model.Retrievable
 import com.embabel.agent.rag.service.RagRequest
 import com.embabel.agent.rag.service.support.FunctionRagFacet
@@ -74,6 +77,7 @@ import org.drivine.manager.loadNearest
 import org.drivine.query.dsl.instanceOf
 import org.drivine.query.dsl.query
 import org.drivine.schema.FullTextIndexSpec
+import org.drivine.schema.RangeIndexSpec
 import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
@@ -177,6 +181,9 @@ class GraphObjectManagerStore(
         )
     private val chunkFullTextIndex = FullTextIndexSpec(properties.chunkNodeName, listOf("text"))
 
+    // Mirrors outline's `where` and `orderBy`, so a document's sections are read off the index in order.
+    private val sectionOrderIndex = RangeIndexSpec("ContentElement", listOf("root_document_id", "ordinal"))
+
     private val provisioner = GraphProvisioner(persistenceManager)
 
     override fun provision() {
@@ -185,6 +192,7 @@ class GraphObjectManagerStore(
             vectorIndexes = listOf(chunkVectorIndex),
             fullTextIndexes = listOf(chunkFullTextIndex),
             constraints = listOf(UniquenessConstraintSpec(properties.entityNodeName, "id")),
+            rangeIndexes = listOf(sectionOrderIndex),
         )
         logger.info("Provisioning complete")
     }
@@ -663,6 +671,71 @@ class GraphObjectManagerStore(
             params = mapOf("rootId" to root.id),
             render = mapOf("chunkLabel" to properties.chunkNodeName),
         )
+        stampReadingOrder(root)
+    }
+
+    /**
+     * Number every section of [root] in reading order — a section before the sections inside it,
+     * and those before its next sibling — and say which document it belongs to. Nothing else
+     * records either: `HAS_PARENT` says what a section belongs to, not where it comes, and a
+     * chunk's `sequence_number` restarts in each container.
+     */
+    private fun stampReadingOrder(root: NavigableDocument) {
+        val sections = readingOrder(root, depth = 1)
+        logger.debug("Stamping reading order on {} sections of '{}'", sections.size, root.uri)
+        val placed = sections.mapIndexedNotNull { index, (section, depth) ->
+            when (section) {
+                is LeafSection ->
+                    LeafSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = index.toLong(), depth = depth)
+                is ContainerSection ->
+                    ContainerSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = index.toLong(), depth = depth)
+                else -> null.also { logger.warn("No model for section {} ({}); it gets no place", section.id, section::class.simpleName) }
+            }
+        }
+        gom.saveAll(placed.filterIsInstance<LeafSectionNode>())
+        gom.saveAll(placed.filterIsInstance<ContainerSectionNode>())
+    }
+
+    private data class PlacedSection(val section: NavigableSection, val depth: Long)
+
+    // NavigableContainerSection.descendants() yields a container's children before any grandchild,
+    // which is level order, not the order the document reads in.
+    private fun readingOrder(section: NavigableSection, depth: Long): List<PlacedSection> =
+        section.children.flatMap { listOf(PlacedSection(it, depth)) + readingOrder(it, depth + 1) }
+
+    /**
+     * The sections of the document at [uri] in reading order: what a table of contents, or a reader
+     * paging through the document, walks. [skip] and [limit] take a window of it. Empty when no
+     * such document is stored. Headings only; a leaf's text is one [findById] away.
+     *
+     * A document ingested before sections were numbered lists nothing until it is ingested again.
+     */
+    fun outline(uri: String, skip: Int = 0, limit: Int? = null): List<DocumentSection> {
+        val root = findContentRootByUri(uri) ?: return emptyList()
+        val headings = gom.loadAll<SectionHeadingNode> {
+            where {
+                query.rootDocumentId eq root.id
+                query.ordinal.isNotNull()
+            }
+            // The document first, though the `where` already fixes it: the index is the pair, and
+            // an ordering is only read off an index that covers exactly what it orders by.
+            orderBy {
+                query.rootDocumentId.asc()
+                query.ordinal.asc()
+            }
+            if (skip > 0) skip(skip)
+            limit?.let { limit(it) }
+        }
+        return headings.map {
+            DocumentSection(
+                id = it.id,
+                title = it.title,
+                parentId = it.parentId,
+                depth = it.depth?.toInt(),
+                leaf = it is LeafSectionHeading,
+                ordinal = it.ordinal,
+            )
+        }
     }
 
     // ----- ResultExpander: context expansion via edge traversal -----
